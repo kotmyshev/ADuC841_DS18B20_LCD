@@ -1,39 +1,35 @@
 /* Программа - термометр OneWire DS18B20+ с выводом на LCD WH0802 */
 /* Отладочная плата MicroConverter SAR Eval Board Rev A3, Кварц 11,059 МГц */
-/* 18 января 2021 */
+/* 19 января 2021 */
 
 #include <ADuC841.h> // Подключаем заголовочный файл для микроконтроллера ADuC841
-
-//#include <intrins.h>  // Подлючаем файл со встрроенными в C51 функциями (нужен NOP)
-//	_nop_() = 0.27 мкс
 
 sbit DQ = P3 ^ 7; // Вывод DQ датчика DS18B20 с интерфейсом 1-wire
 sbit RS = P2 ^ 5; // Вывод LCD выбора команды/символа. “1” – символ, “0”-команда
 sbit RW = P2 ^ 6; // Вывод LCD чтения/записи. “0” – запись, “1” – чтение
 sbit E = P2 ^ 7;  // Строб записи данных на дисплей
 
-sbit OSCV = P3 ^ 3; // Вывод на осцилографф
-
 sbit LED = P3 ^ 4; // Вывод на установленный на плате светодиод D1
+
+#define COMAND RS = 0;   // Выбор режима записи/чтения команд в LCD
+#define RWDATA RS = 1;   // Выбор режима записи/чтения данных в LCD
+#define WRITELCD RW = 0; // Выбор режима LCD - запись
+#define READLCD RW = 1;  // Выбор режима LCD - чтение
 
 char LCD_Print_Select = 0; // Переменная выбора того что выводить на дисплей
 
 /* Время устнавливается в "тиках" срабатывания таймера, один такой "тик" = 5,93 милисекунд */
 
-const unsigned int ButtonHoldTime = 67;  // Время программной защиты от дребезга контактов (~400 мс)
-const unsigned int LCDTextRefresh = 170; // Время обновление данных на дисплее (мс)
+const unsigned int ButtonHoldTime = 60; // Время программной защиты от дребезга контактов (~355 мс)
+const unsigned int LCDTextRefresh = 90; // Время обновление данных на дисплее (~533 мс)
 
-int TicksHold = 0; // счетная переменная программной защиты от дребезга контактов
-int TicksRefr = 0; // счетная переменная для обновления данных
-bit Holdbit = 0;   // бит запрета при нажатии на кнопку
+int TicksHold = 0;  // счетная переменная программной защиты от дребезга контактов
+int TicksRefr = 0;  // счетная переменная для обновления данных
+bit Holdbit = 0;    // бит удержания запрета обработки прерывания при нажатии на кнопку
+bit OW_Enabled = 0; // бит наличия термометра DS18B20+ на линии DQ
 
 char OWRomCode[8];    // Массив байт для хранения 64-битного ROM кода устройства One-Wire
 char OWScratchpad[9]; // Массив для считывания данных из Scratchpad устройства One-Wire
-
-#define COMAND RS = 0;
-#define RWDATA RS = 1;
-#define WRITELCD RW = 0;
-#define READLCD RW = 1;
 
 /*  Переменные для значений количества тиков tickDelay для для 1-wire в соответствии с AN126 */
 // A = 4, B = 42, C = 40, D = 7, E = 6, F = 37, G = 0, H = 315, I = 46, J = 269;
@@ -252,34 +248,51 @@ void SEND(unsigned char SDAT) // WH0802A Display Write Function with strobe
   tickDelay(27); // Wait for more than 39us
 }
 
-char ConvertChar_LCD ( unsigned char InChar) 					// Convert Hex 0-F Number into WH0802A CODE
- {
-		char OutChar = 0x00;
-	 
-	  
-	  if (InChar < 0x01) InChar = 0x00;
-   
-		if (InChar == 0x00) OutChar = 0x30;
-		if (InChar == 0x01) OutChar = 0x31;
-	 	if (InChar == 0x02) OutChar = 0x32;
-	 	if (InChar == 0x03) OutChar = 0x33;
-	 	if (InChar == 0x04) OutChar = 0x34;
-	 	if (InChar == 0x05) OutChar = 0x35;
-	 	if (InChar == 0x06) OutChar = 0x36;
-	 	if (InChar == 0x07) OutChar = 0x37;
-	 	if (InChar == 0x08) OutChar = 0x38;
-	 	if (InChar == 0x09) OutChar = 0x39;
-   
-	 	if (InChar == 0x0A) OutChar = 0x41;
-	 	if (InChar == 0x0B) OutChar = 0x42;
-	 	if (InChar == 0x0C) OutChar = 0x43;
-	 	if (InChar == 0x0D) OutChar = 0x44;
-	 	if (InChar == 0x0E) OutChar = 0x45;
-	 	if (InChar == 0x0F) OutChar = 0x46;   
-		
-    if (InChar > 0x0F) OutChar = 0x3F;
-    
-	 return OutChar;
+char ConvertChar_LCD(unsigned char InChar) // Convert Hex 0-F Number into WH0802A CODE
+{
+  char OutChar = 0x00;
+
+  if (InChar < 0x01)
+    InChar = 0x00;
+
+  if (InChar == 0x00)
+    OutChar = 0x30;
+  if (InChar == 0x01)
+    OutChar = 0x31;
+  if (InChar == 0x02)
+    OutChar = 0x32;
+  if (InChar == 0x03)
+    OutChar = 0x33;
+  if (InChar == 0x04)
+    OutChar = 0x34;
+  if (InChar == 0x05)
+    OutChar = 0x35;
+  if (InChar == 0x06)
+    OutChar = 0x36;
+  if (InChar == 0x07)
+    OutChar = 0x37;
+  if (InChar == 0x08)
+    OutChar = 0x38;
+  if (InChar == 0x09)
+    OutChar = 0x39;
+
+  if (InChar == 0x0A)
+    OutChar = 0x41;
+  if (InChar == 0x0B)
+    OutChar = 0x42;
+  if (InChar == 0x0C)
+    OutChar = 0x43;
+  if (InChar == 0x0D)
+    OutChar = 0x44;
+  if (InChar == 0x0E)
+    OutChar = 0x45;
+  if (InChar == 0x0F)
+    OutChar = 0x46;
+
+  if (InChar > 0x0F)
+    OutChar = 0x3F;
+
+  return OutChar;
 }
 
 void InitializingLCD_8bit(void)
@@ -300,6 +313,8 @@ void InitializingLCD_8bit(void)
 
 void LCD_Print_OneWire_NA(void)
 {
+  unsigned int A;
+
   COMAND;
   SEND(0x80); // First Line
   RWDATA;     //
@@ -314,31 +329,18 @@ void LCD_Print_OneWire_NA(void)
   COMAND;
   SEND(0xC0); // 2-nd line
   RWDATA;
-  SEND(0x48);
-  SEND(0x45);
+  SEND(0x50);
+  SEND(0x33);
+  SEND(0x2E);
+  SEND(0x37);
   SEND(0x20);
-  SEND(0xA8);
-  SEND(0x4F);
-  SEND(0xE0);
-  SEND(0x4B);
-  SEND(0xA7);
-}
+  SEND(0x45);
+  SEND(0x52);
+  SEND(0x52);
 
-void HEXDEC(unsigned int HEXfra)
-
-{
-  unsigned int dectemp = 1000;
-  unsigned int hextemp = HEXfra;
-  unsigned int zz = 0;
-
-  char TTEMP[4] = {0, 0, 0, 0};
-
-  for (zz = 0; zz < 4; zz++)
+  for (A = 0; A < 10; A++)
   {
-    TTEMP[zz] = (hextemp / dectemp);
-    hextemp = hextemp - (TTEMP[zz] * dectemp);
-    dectemp = dectemp / 10;
-    SEND(ConvertChar_LCD(TTEMP[zz]));
+    tickDelay(0xFFFF);
   }
 }
 
@@ -346,6 +348,7 @@ void LCD_Print_Temp(void)
 {
   unsigned char Te; // "Te" - целая часть значения температуры, максимум +125
   unsigned int Tf;  // "Tf" - дробная часть значения температуры
+  unsigned char Tm; // "Tm" - переменная для контроля округления
   char SignT;       //  Знак температуры в кодировке дисплея
 
   OW_ReadTemp(); // Читаем Scratchpad из датчика DS18B20+
@@ -354,7 +357,10 @@ void LCD_Print_Temp(void)
   {                                      // Если значения CRC совпадают, то выполняем код ниже
 
     Te = ((OWScratchpad[1] & 0x07) << 4) | ((OWScratchpad[0] >> 4) & 0x0F); //собираем из частей двух
-    Tf = (OWScratchpad[0] & 0x0F) * 625;                                    // Дробная часть 0,625 х 4 бита (0,625 * 15 = 0,5 градуса)
+    Tf = ((OWScratchpad[0] & 0x0F) * 625) / 100;                            // Дробная часть 0,625 х 4 бита (0,625 * 15 = 0,5 градуса)
+    Tm = ((OWScratchpad[0] & 0x0F) * 625) % 100;                            // Вычисляем остаток от деления для округления в большую сторону
+    if (Tm > 50)
+      Tf++; // Если остаток от деления на 100 больше 50 (включительно) увеличиваем Tf на 1;
 
     // Если температура имеет не отрицательное значение
     if ((OWScratchpad[1] >> 4) == 0x00)
@@ -372,8 +378,8 @@ void LCD_Print_Temp(void)
     else // Если температура имеет отрицательное значение
     {
       SignT = 0x2D; // Первый символ "-"
-      Te = ~Te;     // Инвертируем значение температуры
-      Tf = ~(Tf - 0x01);
+      Te = (0x7F - Te);
+      Tf = (100 - Tf);
     }
 
     COMAND;
@@ -391,9 +397,9 @@ void LCD_Print_Temp(void)
     SEND(ConvertChar_LCD((Te % 100) / 10));
     SEND(ConvertChar_LCD((Te % 100) % 10));
     SEND(0x2E);
-    SEND(ConvertChar_LCD(Tf / 1000));
+    SEND(ConvertChar_LCD(Tf / 10));
     if ((Te / 100) == 0)
-      SEND(ConvertChar_LCD((Tf % 1000) / 100));
+      SEND(ConvertChar_LCD(Tf % 10));
     SEND(0xEF);
     SEND(0x43);
 
@@ -493,28 +499,100 @@ void LCD_Print_ScrPad8(void)
   }
 }
 
+void LCD_Print_ADC(char CHAN)
+{
+  unsigned long int AdcRawData = 0; // Переменная для хранения результата преобразования АЦП
+
+  unsigned int dectemp = 1000;
+  unsigned int hextemp;
+  unsigned int zz = 0;
+
+  char TTEMP[4] = {0, 0, 0, 0};
+
+  ADCCON2 = CHAN;
+  SCONV = 1;
+
+  while (ADCCON3 != 0)
+  {
+  }
+
+  AdcRawData = (ADCDATAH & 0x0F) << 8;
+  AdcRawData += ADCDATAL;
+
+  hextemp = ((AdcRawData * 5000) / 4096) & 0xFFFF;
+
+  for (zz = 0; zz < 4; zz++)
+  {
+    TTEMP[zz] = (hextemp / dectemp);
+    hextemp = hextemp - (TTEMP[zz] * dectemp);
+    dectemp = dectemp / 10;
+  }
+
+  COMAND;
+  SEND(0x01);      // Display Clear
+  tickDelay(1030); // Wait for more than 1.53ms
+
+  COMAND;
+  SEND(0x80); // First Line "ADC'
+  RWDATA;
+  SEND(0x41);
+  SEND(0x44);
+  SEND(0x43);
+  SEND(0x20);
+
+  if (CHAN == 8)
+  {
+    SEND(0x54);
+    SEND(0x2E);
+  }
+  else
+  {
+    SEND(ConvertChar_LCD(CHAN));
+  }
+
+  COMAND;
+  SEND(0xC0); // 2-nd Line = Voltage
+  RWDATA;
+
+  SEND(ConvertChar_LCD(TTEMP[0]));
+  SEND(0x2E);
+  SEND(ConvertChar_LCD(TTEMP[1]));
+  SEND(ConvertChar_LCD(TTEMP[2]));
+  SEND(ConvertChar_LCD(TTEMP[3]));
+  SEND(0x20);
+  SEND(0x56);
+}
+
 void LCD_Print_Selected_One(void)
 {
 
-  switch (LCD_Print_Select)
+  if (LCD_Print_Select < 9)
   {
-  case 0:
-  {
-    LCD_Print_Temp();
-    break;
+    LCD_Print_ADC(LCD_Print_Select);
   }
+  else
+  {
 
-  case 1:
-  {
-    LCD_Print_ScrPad8();
-    break;
-  }
+    switch (LCD_Print_Select)
+    {
+    case 9:
+    {
+      LCD_Print_Temp();
+      break;
+    }
 
-  case 2:
-  {
-    LCD_Print_RomCode();
-    break;
-  }
+    case 10:
+    {
+      LCD_Print_ScrPad8();
+      break;
+    }
+
+    case 11:
+    {
+      LCD_Print_RomCode();
+      break;
+    }
+    }
   }
 }
 
@@ -532,7 +610,7 @@ void int0(void) interrupt 0 // Отработка прерывания по на
     Holdbit = 1;
 
     LCD_Print_Select++;
-    if (LCD_Print_Select > 2)
+    if (LCD_Print_Select > 11)
       LCD_Print_Select = 0;
 
     LCD_Print_Selected_One();
@@ -542,7 +620,6 @@ void int0(void) interrupt 0 // Отработка прерывания по на
 void T0Isr(void) interrupt 1 // Отработка прерывания от Таймера 0
 {
   TF0 = 0; // Сброс флага прерывания таймера
-  //TL0 = 0; TH0 = 0;     // Начальное счетное значение таймера 0
 
   if (TicksHold < ButtonHoldTime)
   {
@@ -555,24 +632,6 @@ void T0Isr(void) interrupt 1 // Отработка прерывания от Т�
     TR0 = 0;
     TicksHold = 0; // Обнуляем переменную
     Holdbit = 0;
-  }
-}
-
-void T2Isr(void) interrupt 5 using 1 // Отработка прерывания от Таймера 1
-{
-  TF2 = 0; // Сброс флага прерывания таймера
-
-  if (TicksRefr < LCDTextRefresh)
-  {
-    TicksRefr++; // счетная переменная увеличивается на 1
-  }
-  else
-  {
-    TicksRefr = 0; // Обнуляем переменную
-
-    LCD_Print_Selected_One(); // обновляем данные на дисплее
-
-    OSCV = ~OSCV;
   }
 }
 
@@ -594,6 +653,8 @@ void main(void) //Основная программа
 
   TMOD |= 0x1; // Таймеры 0 устанавливаем в режим 16-ти разрядного таймера
 
+  ADCCON1 = 0x08C; // power up ADC /32 + 4 acq clock
+
   DQ = 1; // Поддтягиваем Шину данных 1-wire к +5В (Pull-up резистор)
 
   InitializingLCD_8bit();
@@ -610,26 +671,12 @@ void main(void) //Основная программа
     if ((OWRomCode[0] == 0x28) & (OWRomCode[7] == OW_CRC_ROM()))
 
     {
-      LED = 0; // Зажигаем светодиод (LED=0)
-
-      //OW_ReadTemp();
-      //LCD_Print_Temp();
+      LED = 0;                  // Зажигаем светодиод (LED=0)
+      OW_Enabled = 1;           // устройство 1-wire присутствует
+      LCD_Print_Select = 9;     // Выводим на дисплей температуру
+      LCD_Print_Selected_One(); // Поехали )))
     }
   }
-
-  /*
-OSCV = 1;
-
-RCAP2H = 0x0;
-RCAP2L = 0x0;
-T2CON &= 0x0FC;
-ET2 = 1;
-
-T2CON |= 0x4;
-
-*/
-
-  LCD_Print_Selected_One();
 
   while (1) /* Весьма Бесконечный цикл */
   {
@@ -642,7 +689,6 @@ T2CON |= 0x4;
       if (TicksRefr == LCDTextRefresh)
       {
         TicksRefr = 0;
-        OSCV = ~OSCV;
         LCD_Print_Selected_One();
       }
     }
